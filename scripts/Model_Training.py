@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import sys
@@ -31,6 +32,7 @@ from scripts.preprocessing import preprocess_building
 from scripts.feature_engineering import engineer_features
 from scripts.scaling import scale_features
 from scripts.sequence_creations import create_sequences
+from scripts.splitting import decide_split, split_windows, validation_row_mask
 
 # Global Configurations
 from src.config import CONFIG
@@ -70,8 +72,9 @@ meta = pd.read_csv(META_PATH)
 
 from src.config import FEATURE_COLS
 from src.config import BUILDINGS
+from src.config import BUILDING_SPLIT
 
-selected_buildings = BUILDINGS  # Select the first five buildings for analysis
+selected_buildings = BUILDINGS  # Buildings listed in src/config.py
 
 building_data = {}
 
@@ -86,16 +89,22 @@ for building in selected_buildings:
     df_features = engineer_features(df_clean, building, meta)
     print(f"  Features shape: {df_features.shape}")
 
-    # Per-building CSV for testing (load → scale → sequence → predict; no wide table at inference)
+    # Per-building CSV for testing (load → scale → sequence → predict; no wide table at inference).
+    # Index is tz-aware UTC (continuous hourly grid); local-time features are already baked in.
     _PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out_csv = _PROCESSED_DIR / f"{building}.csv"
     df_features.reset_index().to_csv(out_csv, index=False)
     print(f"  Saved {out_csv}")
 
+    # Split policy: holdout (train on the early part, test on the end) or full-history training, depending on
+    # how much data the building has (see scripts/splitting.py and the split settings in src/config.py).
+    decision = decide_split(df_features.index, building, CONFIG, BUILDING_SPLIT)
+    print(f"  {decision['message']}")
+
     X_train_sc, X_test_sc, scaler, split_idx = scale_features(
         df=df_features,
         feature_cols=FEATURE_COLS,
-        test_split=CONFIG["test_split"],
+        split_idx=decision["split_idx"],
     )
     _scalers_dir = _PROJECT_ROOT / "scalers"
     _scalers_dir.mkdir(parents=True, exist_ok=True)
@@ -105,14 +114,32 @@ for building in selected_buildings:
     X_train_seq = create_sequences(X_train_sc, CONFIG["window_size"])
     X_test_seq = create_sequences(X_test_sc, CONFIG["window_size"])
 
-    print(f"  Train windows  : {X_train_seq.shape}")   # (n_windows, 30, n_features)
+    print(f"  Train windows  : {X_train_seq.shape}")   # (n_windows, window_size, n_features)
     print(f"  Test windows   : {X_test_seq.shape}")
+
+    # Validation windows for early stopping: short blocks spread over the whole training period, so every
+    # season is represented in both fitting and validation (instead of "the last 10%", which is one season).
+    val_rows = validation_row_mask(len(X_train_sc), CONFIG["val_fraction"], CONFIG["val_block_days"])
+    fit_idx, val_idx = split_windows(val_rows, CONFIG["window_size"])
+    print(f"  Fit windows    : {len(fit_idx)}  | Validation windows: {len(val_idx)} "
+          f"({int(val_rows.sum())} validation rows in blocks)")
+
+    # Split metadata so Model_Testing.py reproduces exactly the same train / test boundary
+    _PROJECT_ROOT.joinpath(CONFIG["model_dir"]).mkdir(parents=True, exist_ok=True)
+    meta_out = dict(decision, n_fit_windows=int(len(fit_idx)), n_val_windows=int(len(val_idx)),
+                    val_fraction=CONFIG["val_fraction"], val_block_days=CONFIG["val_block_days"],
+                    window_size=CONFIG["window_size"], n_features=len(FEATURE_COLS))
+    with open(_PROJECT_ROOT / CONFIG["model_dir"] / f"{building}_split.json", "w", encoding="utf-8") as fh:
+        json.dump(meta_out, fh, indent=2)
 
     # Store everything needed for model training
     building_data[building] = {
         "df"          : df_features,
         "X_train"     : X_train_seq,
         "X_test"      : X_test_seq,
+        "fit_idx"     : fit_idx,
+        "val_idx"     : val_idx,
+        "decision"    : decision,
         "scaler"      : scaler,
         "split_idx"   : split_idx,
     }
@@ -142,8 +169,10 @@ for building, data in building_data.items():
     print(f"\n{'='*40}")
     print(f"Training model: {building}")
 
-    X_train    = data["X_train"]
-  
+    X_train    = data["X_train"][data["fit_idx"]]   # windows used to update the weights
+    X_val      = data["X_train"][data["val_idx"]]   # validation windows (blocks spread over the whole period)
+    if len(X_val) == 0 or len(X_train) == 0:
+        raise SystemExit(f"{building}: not enough data to build separate fit and validation windows.")
 
     # build a fresh model for each building
     model = build_lstm_autoencoder(
@@ -155,6 +184,8 @@ for building, data in building_data.items():
         dropout_rate  = CONFIG["dropout_rate"],
         learning_rate = CONFIG["learning_rate"],
     )
+
+    (_PROJECT_ROOT / CONFIG["model_dir"]).mkdir(parents=True, exist_ok=True)
 
     callbacks = [
         EarlyStopping(
@@ -171,14 +202,12 @@ for building, data in building_data.items():
         ),
     ]
 
-    (_PROJECT_ROOT / CONFIG["model_dir"]).mkdir(parents=True, exist_ok=True)
-
     # autoencoder training — input == target
     history = model.fit(
         X_train, X_train,
         epochs          = CONFIG["epochs"],
         batch_size      = CONFIG["batch_size"],
-        validation_split= 0.1,
+        validation_data = (X_val, X_val),
         callbacks       = callbacks,
         shuffle         = True,
         verbose         = 1,
@@ -204,5 +233,11 @@ for building, data in building_data.items():
     print(f"  Loss plot saved for {building}")
 
 print(f"\nAll done. {len(trained_models)} models trained.")
+
+print("\nSplit strategy per building:")
+for b, d in building_data.items():
+    dec = d["decision"]
+    kind = "FULL history (no held-out test period)" if dec["strategy"] == "full" else "HOLDOUT (last part is test)"
+    print(f"  {b:20s} {kind}  - {dec['reason']}")
 
 

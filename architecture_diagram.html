@@ -225,7 +225,7 @@
       <span class="title">Input Sequence</span>
       <span class="desc">Sliding window of scaled feature vectors from the energy time-series</span>
     </div>
-    <span class="badge badge-input">30 × 17</span>
+    <span class="badge badge-input">24 × 13</span>
   </div>
 
   <div class="arrow"><span>↓</span></div>
@@ -237,7 +237,7 @@
       <span class="title">Encoder LSTM — Layer 1</span>
       <span class="desc">Processes full sequence; return_sequences=True passes all hidden states forward</span>
     </div>
-    <span class="badge badge-enc">LSTM · 64 units</span>
+    <span class="badge badge-enc">LSTM · 32 units</span>
   </div>
 
   <div class="arrow"><span>↓ Dropout 0.1</span></div>
@@ -247,7 +247,7 @@
       <span class="title">Encoder LSTM — Layer 2</span>
       <span class="desc">Summarises the entire window into a single vector; return_sequences=False</span>
     </div>
-    <span class="badge badge-enc">LSTM · 32 units</span>
+    <span class="badge badge-enc">LSTM · 16 units</span>
   </div>
 
   <div class="arrow"><span>↓ Dropout 0.1</span></div>
@@ -257,14 +257,14 @@
   <div class="node node-latent">
     <div class="left">
       <span class="title">Latent Vector  ⟨ Bottleneck ⟩</span>
-      <span class="desc">Dense(ReLU) compresses the 32-D encoder output into a minimal representation of normal behaviour</span>
+      <span class="desc">Dense(ReLU) compresses the 16-D encoder output into a minimal representation of normal behaviour</span>
     </div>
-    <span class="badge badge-latent">Dense · 16</span>
+    <span class="badge badge-latent">Dense · 8</span>
   </div>
 
   <div class="bottleneck-note">
     ⚡ <strong>Why the bottleneck matters:</strong>
-    The model is forced to represent an entire 30-timestep window in just 16 numbers.
+    The model is forced to represent an entire 24-timestep window in just 8 numbers.
     Anything that cannot be compressed (anomalous patterns) → large reconstruction error.
   </div>
 
@@ -274,9 +274,9 @@
   <div class="node node-repeat">
     <div class="left">
       <span class="title">Repeat Vector</span>
-      <span class="desc">Broadcasts the 16-D latent vector into a sequence of window_size identical vectors</span>
+      <span class="desc">Broadcasts the 8-D latent vector into a sequence of window_size identical vectors</span>
     </div>
-    <span class="badge badge-latent">30 × 16</span>
+    <span class="badge badge-latent">24 × 8</span>
   </div>
 
   <div class="arrow"><span>↓</span></div>
@@ -288,7 +288,7 @@
       <span class="title">Decoder LSTM — Layer 1</span>
       <span class="desc">Interprets the repeated latent context; return_sequences=True produces a full sequence</span>
     </div>
-    <span class="badge badge-decoder">LSTM · 32 units</span>
+    <span class="badge badge-decoder">LSTM · 16 units</span>
   </div>
 
   <div class="arrow"><span>↓ Dropout 0.1</span></div>
@@ -298,7 +298,7 @@
       <span class="title">Decoder LSTM — Layer 2</span>
       <span class="desc">Refines the reconstruction; symmetrical to Encoder Layer 1</span>
     </div>
-    <span class="badge badge-decoder">LSTM · 64 units</span>
+    <span class="badge badge-decoder">LSTM · 32 units</span>
   </div>
 
   <div class="arrow"><span>↓ Dropout 0.1</span></div>
@@ -310,7 +310,7 @@
       <span class="title">TimeDistributed Dense</span>
       <span class="desc">Applies the same Dense layer at every timestep — projects back to the original feature space</span>
     </div>
-    <span class="badge badge-output">30 × 17</span>
+    <span class="badge badge-output">24 × 13</span>
   </div>
 
   <div class="arrow"><span>↓ MSE Loss</span></div>
@@ -320,9 +320,9 @@
   <div class="node node-score">
     <div class="left">
       <span class="title">Reconstruction Error (MSE)</span>
-      <span class="desc">mean((original − reconstructed)²)  →  high score = anomaly when score &gt; μ + 3σ</span>
+      <span class="desc">mean((original − reconstructed)²)  →  high score = anomaly when score &gt; rolling median + 6×MAD (EMA-smoothed, frozen during drift)</span>
     </div>
-    <span class="badge badge-score">Threshold: μ + 3σ</span>
+    <span class="badge badge-score">Median + 6×MAD</span>
   </div>
 
 </div>
@@ -340,38 +340,38 @@
 <div class="summary-grid">
   <div class="summary-card">
     <h3>Input Config</h3>
-    <div class="param-row"><span>Window size</span><span class="val">30 timesteps</span></div>
-    <div class="param-row"><span>Features</span><span class="val">17</span></div>
-    <div class="param-row"><span>Input shape</span><span class="val">(30, 17)</span></div>
+    <div class="param-row"><span>Window size</span><span class="val">24 timesteps</span></div>
+    <div class="param-row"><span>Features</span><span class="val">13</span></div>
+    <div class="param-row"><span>Input shape</span><span class="val">(24, 13)</span></div>
     <div class="param-row"><span>Scaler</span><span class="val">MinMaxScaler</span></div>
   </div>
   <div class="summary-card">
     <h3>Encoder Stack</h3>
-    <div class="param-row"><span>LSTM Layer 1</span><span class="val">64 units</span></div>
+    <div class="param-row"><span>LSTM Layer 1</span><span class="val">32 units</span></div>
     <div class="param-row"><span>return_sequences</span><span class="val">True</span></div>
-    <div class="param-row"><span>LSTM Layer 2</span><span class="val">32 units</span></div>
+    <div class="param-row"><span>LSTM Layer 2</span><span class="val">16 units</span></div>
     <div class="param-row"><span>return_sequences</span><span class="val">False</span></div>
-    <div class="param-row"><span>Latent Dense</span><span class="val">16 (ReLU)</span></div>
+    <div class="param-row"><span>Latent Dense</span><span class="val">8 (ReLU)</span></div>
   </div>
   <div class="summary-card">
     <h3>Decoder Stack</h3>
-    <div class="param-row"><span>RepeatVector</span><span class="val">30×16</span></div>
-    <div class="param-row"><span>LSTM Layer 1</span><span class="val">32 units</span></div>
-    <div class="param-row"><span>LSTM Layer 2</span><span class="val">64 units</span></div>
-    <div class="param-row"><span>TimeDistributed</span><span class="val">Dense(17)</span></div>
+    <div class="param-row"><span>RepeatVector</span><span class="val">24×8</span></div>
+    <div class="param-row"><span>LSTM Layer 1</span><span class="val">16 units</span></div>
+    <div class="param-row"><span>LSTM Layer 2</span><span class="val">32 units</span></div>
+    <div class="param-row"><span>TimeDistributed</span><span class="val">Dense(13)</span></div>
   </div>
   <div class="summary-card">
     <h3>Training</h3>
     <div class="param-row"><span>Optimizer</span><span class="val">Adam</span></div>
     <div class="param-row"><span>LR</span><span class="val">0.001</span></div>
     <div class="param-row"><span>Loss</span><span class="val">MSE</span></div>
-    <div class="param-row"><span>EarlyStopping</span><span class="val">patience=10</span></div>
+    <div class="param-row"><span>EarlyStopping</span><span class="val">patience=8 (max 100 epochs)</span></div>
     <div class="param-row"><span>Dropout</span><span class="val">0.1</span></div>
   </div>
   <div class="summary-card">
     <h3>Anomaly Detection</h3>
     <div class="param-row"><span>Error metric</span><span class="val">MSE per window</span></div>
-    <div class="param-row"><span>Threshold</span><span class="val">μ + 3σ (train)</span></div>
+    <div class="param-row"><span>Threshold</span><span class="val">rolling 7-day median + 6×MAD</span></div>
     <div class="param-row"><span>Approach</span><span class="val">Unsupervised</span></div>
     <div class="param-row"><span>Labels required</span><span class="val">None</span></div>
   </div>

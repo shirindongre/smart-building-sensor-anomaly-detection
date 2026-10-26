@@ -1,0 +1,33 @@
+{
+  "building": "Office_Emerald",
+  "strategy": "full",
+  "requested": "auto",
+  "split_idx": 8616,
+  "n_rows": 8616,
+  "start": "2012-01-08 05:00:00+00:00",
+  "end": "2013-01-01 04:00:00+00:00",
+  "span_days": 359,
+  "train_days": 359,
+  "train_months": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "reason": "a holdout would leave only 288 training days (< 365)",
+  "message": "Full-history training for Office_Emerald: 359 days of data; a holdout would leave only 288 training days (< 365). All rows are used for training so every season is learned. There is no held-out test period for this building - its flags on the history are in-sample, and future data will be evaluated as it arrives.",
+  "n_fit_windows": 7638,
+  "n_val_windows": 725,
+  "val_fraction": 0.1,
+  "val_block_days": 7,
+  "window_size": 24,
+  "n_features": 13
+}

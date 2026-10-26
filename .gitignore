@@ -21,3 +21,6 @@ data/
 
 venv/
 .venv/
+
+# === Local backups (pre-retrain safety copy) ===
+backup_pre_retrain/

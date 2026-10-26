@@ -1,0 +1,14 @@
+# Versions are not pinned because the original environment was not recorded (Python 3.12 was used).
+# After a clean install that reproduces your results, run `pip freeze > requirements-lock.txt`.
+numpy
+pandas
+scikit-learn
+joblib
+matplotlib
+seaborn
+tensorflow
+keras
+jupyter
+streamlit  # demo UI (app/app.py)
+plotly  # demo UI charts
+pytest  # tests for scripts/demo_core.py

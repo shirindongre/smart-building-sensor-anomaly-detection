@@ -1,0 +1,3 @@
+building,mode,events_injected,events_inert,events,events_detected,event_recall,events_alerted_incl_drift,median_delay_hours,clean_windows,false_alarm_windows,false_alarm_rate_pct,window_precision,auc_normalized_error,auc_reconstruction_error,auc_baseline_same_hour_last_week,ignored_windows,evaluated_windows,recall_dropout,recall_flatline,recall_level_shift,recall_spike
+UnivDorm_Mitch,blocked,25,1,24,19,0.7916666666666666,19,3.0,4124,113,2.7400581959262853,0.8061749571183533,0.8781304660138225,0.8532328364629539,0.8604576131553636,2675,7994,1.0,0.2,1.0,0.8571428571428571
+UnivLab_Brenna,blocked,25,0,25,19,0.76,19,2.0,4148,136,3.278688524590164,0.7486136783733827,0.9245142198711569,0.9231584334880971,0.8521540077823408,2618,8018,1.0,0.5,1.0,0.5714285714285714

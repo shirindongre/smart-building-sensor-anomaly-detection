@@ -1,0 +1,55 @@
+{
+ "summary": {
+  "events_injected": 25,
+  "events_inert": 0,
+  "events": 25,
+  "events_detected": 19,
+  "event_recall": 0.76,
+  "events_alerted_incl_drift": 19,
+  "median_delay_hours": 2.0,
+  "clean_windows": 4148,
+  "false_alarm_windows": 136,
+  "false_alarm_rate_pct": 3.278688524590164,
+  "window_precision": 0.7486136783733827,
+  "auc_normalized_error": 0.9245142198711569,
+  "auc_reconstruction_error": 0.9231584334880971,
+  "auc_baseline_same_hour_last_week": 0.8521540077823408,
+  "ignored_windows": 2618,
+  "evaluated_windows": 8018,
+  "by_type": {
+   "dropout": {
+    "events": 5,
+    "detected": 5,
+    "recall": 1.0,
+    "median_delay_hours": 1.0
+   },
+   "flatline": {
+    "events": 6,
+    "detected": 3,
+    "recall": 0.5,
+    "median_delay_hours": 11.0
+   },
+   "level_shift": {
+    "events": 7,
+    "detected": 7,
+    "recall": 1.0,
+    "median_delay_hours": 5.0
+   },
+   "spike": {
+    "events": 7,
+    "detected": 4,
+    "recall": 0.5714285714285714,
+    "median_delay_hours": 1.5
+   }
+  }
+ },
+ "info": {
+  "mode": "blocked",
+  "folds": 5,
+  "blocks": 26,
+  "backend": "lstm",
+  "seed": 7,
+  "quick": false,
+  "epochs_cap": 30
+ }
+}

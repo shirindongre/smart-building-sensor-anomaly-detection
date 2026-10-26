@@ -5,6 +5,7 @@ No wide multi-building download and no preprocess_building / engineer_features h
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -28,19 +29,6 @@ def _sensor_lstm_building_plots_dir(building: str) -> str:
     return os.path.join(str(_PROJECT_ROOT), _PLOTS_BASE_DIR, building)
 
 
-_EXPECTED_VENV_PY = _PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
-try:
-    _RUNNING_PY = Path(sys.executable).resolve()
-except Exception:
-    _RUNNING_PY = Path(sys.executable)
-if _EXPECTED_VENV_PY.exists() and _RUNNING_PY != _EXPECTED_VENV_PY.resolve():
-    print(
-        "[WARN] You are not running the project virtualenv interpreter.\n"
-        f"       Running:  {_RUNNING_PY}\n"
-        f"       Expected: {_EXPECTED_VENV_PY}\n"
-        "       Fix: run with the venv python, e.g.\n"
-        f"         & \"{_EXPECTED_VENV_PY}\" \"{Path(__file__).resolve()}\""
-    )
 for p in (_PROJECT_ROOT, _SCRIPT_DIR):
     s = str(p)
     if s not in sys.path:
@@ -49,6 +37,7 @@ for p in (_PROJECT_ROOT, _SCRIPT_DIR):
 from src.config import BUILDINGS, CONFIG, FEATURE_COLS
 
 from sequence_creations import create_sequences
+from anomaly_scoring import add_adaptive_thresholding, build_results_df  # noqa: F401  (re-exported)
 
 os.makedirs(_PROJECT_ROOT / CONFIG["output_dir"], exist_ok=True)
 
@@ -95,114 +84,40 @@ def load_building_features(building: str) -> pd.DataFrame:
     return df
 
 
+def load_split_info(building: str, n_rows: int) -> dict:
+    """
+    Train / test boundary for one building, exactly as used at training time.
+
+    Reads ``models/<building>_split.json`` (written by Model_Training.py). Models trained before that file existed
+    fall back to the legacy 80/20 holdout. If the CSV has MORE rows than at training time, the extra (newer) rows
+    count as unseen "test" data - this is how future data for a full-history building gets evaluated.
+    """
+    meta_path = _PROJECT_ROOT / CONFIG["model_dir"] / f"{building}_split.json"
+    if not meta_path.is_file():
+        split_idx = int(n_rows * (1.0 - float(CONFIG.get("test_split", 0.2))))
+        return {
+            "strategy": "holdout",
+            "split_idx": split_idx,
+            "message": f"No split metadata at {meta_path.name}: assuming the legacy 80/20 holdout. "
+                       "Re-run scripts/Model_Training.py to record the split.",
+        }
+    with open(meta_path, encoding="utf-8") as fh:
+        meta = json.load(fh)
+    split_idx = int(meta["split_idx"])
+    if n_rows < split_idx:
+        meta["message"] += f" WARNING: CSV now has {n_rows} rows, fewer than at training ({split_idx})."
+        split_idx = n_rows
+    elif n_rows > int(meta.get("n_rows", n_rows)):
+        meta["message"] += (f" {n_rows - int(meta['n_rows'])} newer rows than the training data are treated "
+                            "as unseen test data.")
+    meta["split_idx"] = split_idx
+    return meta
+
+
 def compute_reconstruction_errors(model, sequences: np.ndarray) -> np.ndarray:
     reconstructed = model.predict(sequences, verbose=0)
     errors = np.mean(np.power(sequences - reconstructed, 2), axis=(1, 2))
     return errors
-
-
-def _rolling_mad(values: np.ndarray) -> float:
-    """MAD within one window: median(|x - median(x)|). Used with rolling(..., apply, raw=True)."""
-    med = np.median(values)
-    return float(np.median(np.abs(values - med)))
-
-
-def add_adaptive_thresholding(
-    results_df: pd.DataFrame,
-    *,
-    threshold_method: str = "rolling_percentile",
-    rolling_window_days: int = 7,
-    robust_z_k: float = 3.5,
-    anomaly_rate_drift_threshold: float = 0.30,
-) -> pd.DataFrame:
-    """
-    Post-process reconstruction errors: robust normalization, drift vs anomaly separation,
-    smoothed MAD-based threshold with freeze-during-drift.
-
-    ``threshold_method``, ``rolling_window_days``, ``robust_z_k``, and
-    ``anomaly_rate_drift_threshold`` are kept for call-site compatibility; tunables are read
-    from ``CONFIG`` (see ``error_rolling_window_hours``, ``threshold_mad_k``, etc.).
-
-    No future leakage: rolling statistics on errors use only past data (closed='left').
-    """
-    if results_df.index.name is None:
-        results_df = results_df.copy()
-        results_df.index.name = "timestamp"
-
-    if not isinstance(results_df.index, pd.DatetimeIndex):
-        raise ValueError("results_df must be indexed by timestamp (DatetimeIndex)")
-
-    if "reconstruction_error" not in results_df.columns:
-        raise ValueError("results_df missing required column 'reconstruction_error'")
-
-    df = results_df.sort_index().copy()
-    err = df["reconstruction_error"]
-
-    # --- 1) Rolling robust location / scale on reconstruction_error (calendar / time window) ---
-    hours = int(CONFIG.get("error_rolling_window_hours", 168))
-    roll_spec = f"{hours}h"
-    eps = float(CONFIG.get("mad_epsilon", 1e-6))
-    past = err.rolling(roll_spec, min_periods=1, closed="left")
-
-    rolling_median = past.median()
-    rolling_mad = past.apply(_rolling_mad, raw=True)
-    # Legacy diagnostic column (unchanged name) for CSV consumers that expect rolling_p99.
-    rolling_p99 = past.quantile(0.99)
-
-    # Early rows: no past window yet — fall back so downstream math stays finite.
-    rolling_median = rolling_median.fillna(err)
-    rolling_mad = rolling_mad.fillna(0.0)
-    rolling_p99 = rolling_p99.fillna(err)
-
-    df["rolling_median"] = rolling_median.astype(float)
-    df["rolling_mad"] = rolling_mad.astype(float)
-    df["rolling_p99"] = rolling_p99.astype(float)
-
-    # --- 2) Stabilized robust z-score (same rolling median / MAD + epsilon) ---
-    df["normalized_error"] = ((err - df["rolling_median"]) / (df["rolling_mad"] + eps)).astype(float)
-
-    # --- 3) Drift from normalized score only (independent of threshold; no leakage into drift rule) ---
-    drift_z = float(CONFIG.get("drift_z_threshold", 5.0))
-    sustain = int(CONFIG.get("drift_sustain_points", 24))
-    high_norm = (df["normalized_error"] > drift_z).astype(np.int8)
-    # Sustained elevation: last ``sustain`` points must all exceed drift_z.
-    sustained_ct = high_norm.rolling(sustain, min_periods=sustain).sum()
-    df["drift_flag"] = (sustained_ct >= sustain).astype(int)
-
-    # --- 4) Threshold: median + k * MAD, then EMA smooth ---
-    k = float(CONFIG.get("threshold_mad_k", 6.0))
-    ema_span = int(CONFIG.get("threshold_ema_span", 24))
-    threshold_raw = df["rolling_median"] + k * df["rolling_mad"]
-    threshold_smooth = threshold_raw.ewm(span=ema_span, adjust=False).mean()
-
-    # --- 5) Freeze threshold while drift_flag is active (carry last pre-drift smoothed value) ---
-    thr_carry = threshold_smooth.mask(df["drift_flag"].astype(bool)).ffill().bfill()
-    df["threshold"] = threshold_smooth.where(df["drift_flag"] == 0, thr_carry).astype(float)
-
-    # --- 6) Anomalies only when error exceeds threshold and we are not in a drift regime ---
-    df["anomaly_flag"] = ((err > df["threshold"]) & (df["drift_flag"] == 0)).astype(int)
-
-    return df
-
-
-def build_results_df(df_features, all_errors, window_size, split_idx):
-    time_index = df_features.index[window_size - 1 : window_size - 1 + len(all_errors)]
-
-    results_df = pd.DataFrame(
-        {
-            "energy": df_features["energy"].values[
-                window_size - 1 : window_size - 1 + len(all_errors)
-            ],
-            "reconstruction_error": all_errors,
-            "split": [
-                "train" if i < (split_idx - window_size + 1) else "test"
-                for i in range(len(all_errors))
-            ],
-        },
-        index=time_index,
-    )
-
-    return results_df
 
 
 def _iter_true_segments(mask: pd.Series):
@@ -307,7 +222,7 @@ def save_plots(
     axes[0].set_title(
         f"Energy Consumption — Anomalies Highlighted — {building}", fontweight="bold"
     )
-    axes[0].set_ylabel("Energy (scaled)")
+    axes[0].set_ylabel("Energy (raw units)")
     axes[0].legend(fontsize=9)
     axes[0].grid(True, alpha=0.25)
 
@@ -368,7 +283,7 @@ def save_plots(
     )
     ax.set_title(f"Normalized Error — {building}", fontweight="bold")
     ax.set_xlabel("Timestamp")
-    ax.set_ylabel("z-score (median / (MAD + ε))")
+    ax.set_ylabel("Robust z-score: (err - median) / (MAD + ε)")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.25)
     plt.tight_layout()
@@ -428,9 +343,11 @@ def export_report(results_df, building, output_dir, *, threshold_method: str, ro
     )
     print(f"  Total windows     : {total}")
     print(f"  Anomalies (all)   : {n_anomaly}  ({100 * n_anomaly / total:.2f} %)")
-    print(
-        f"  Anomalies (test)  : {n_test_anom}  ({100 * n_test_anom / len(test_df):.2f} %)"
-    )
+    if len(test_df):
+        print(f"  Anomalies (test)  : {n_test_anom}  ({100 * n_test_anom / len(test_df):.2f} %)")
+    else:
+        print("  Anomalies (test)  : n/a - no held-out period for this building (full-history training); "
+              "all flags above are in-sample. Future data will be evaluated as it arrives.")
     print(f"  Report saved      : {csv_path}")
 
 
@@ -494,33 +411,49 @@ def main():
             continue
         scaler = load_scaler(scaler_path)
 
-        test_split = float(CONFIG.get("test_split", 0.2))
-        split_idx = int(len(df_features) * (1.0 - test_split))
+        split_info = load_split_info(building, len(df_features))
+        split_idx = int(split_info["split_idx"])
         window = int(CONFIG["window_size"])
+        print(f"  {split_info['message']}")
 
-        train_df = df_features.iloc[:split_idx]
-        test_df = df_features.iloc[split_idx:]
+        n_feat = len(FEATURE_COLS)
+        scaler_n = getattr(scaler, "n_features_in_", n_feat)
+        if scaler_n != n_feat:
+            print(
+                f"  [SKIP] Scaler was fitted on {scaler_n} features but FEATURE_COLS has {n_feat}. "
+                "Re-run scripts/Model_Training.py to rebuild scalers and models."
+            )
+            continue
 
-        X_train_sc = scaler.transform(train_df[FEATURE_COLS].to_numpy())
-        X_test_sc = scaler.transform(test_df[FEATURE_COLS].to_numpy())
+        # Scale the whole frame with the TRAIN-fitted scaler, then build windows over the full frame so
+        # test windows overlap the train/test boundary instead of being cut off (timestamps stay aligned).
+        X_all_sc = scaler.transform(df_features[FEATURE_COLS].to_numpy())
+        X_all_seq = create_sequences(X_all_sc, window)
 
-        X_train_seq = create_sequences(X_train_sc, window)
-        X_test_seq = create_sequences(X_test_sc, window)
+        n_train_windows = max(split_idx - window + 1, 0)  # windows ending strictly before split_idx
+        print(f"  Windows total  : {X_all_seq.shape}  (train-only: {n_train_windows})")
 
-        print(f"  Train windows  : {X_train_seq.shape}")
-        print(f"  Test windows   : {X_test_seq.shape}")
-
-        if len(X_train_seq) == 0 or len(X_test_seq) == 0:
-            print("  [SKIP] Not enough rows for at least one train/test window.")
+        if n_train_windows == 0:
+            print("  [SKIP] Not enough rows for at least one training window.")
+            continue
+        if len(X_all_seq) <= n_train_windows and split_info.get("strategy") != "full":
+            print("  [SKIP] Not enough rows for at least one test window.")
             continue
 
         model = load_model(model_path, compile=False)
         model.compile(optimizer="adam", loss="mse")
         print(f"  Model loaded : {model_path}")
 
-        X_all_seq = np.vstack((X_train_seq, X_test_seq))
-        train_errors = compute_reconstruction_errors(model, X_train_seq)
+        model_n_feat = model.input_shape[-1]
+        if model_n_feat != n_feat:
+            print(
+                f"  [SKIP] Model expects {model_n_feat} features but FEATURE_COLS has {n_feat}. "
+                "Re-run scripts/Model_Training.py to retrain."
+            )
+            continue
+
         all_errors = compute_reconstruction_errors(model, X_all_seq)
+        train_errors = all_errors[:n_train_windows]
 
         print(f"\n  Results for {building}:")
 
