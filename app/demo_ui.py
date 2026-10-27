@@ -13,11 +13,20 @@ CSS = """
 html, body, [class*="css"] { font-size: 18px; }
 .block-container { padding-top: 2.2rem; max-width: 1500px; }
 [data-testid="stMetricValue"] { font-size: 2.9rem; font-weight: 600; }
-[data-testid="stMetricLabel"] p { font-size: 1.05rem; color: #4B5563; }
-[data-testid="stCaptionContainer"] p { font-size: 1.0rem; color: #4B5563; }
+[data-testid="stMetricLabel"] p { font-size: 1.05rem; color: #B9BFC8; }
+[data-testid="stCaptionContainer"] p { font-size: 1.0rem; color: #B9BFC8; }
 h1 { font-size: 2.3rem; }
 .policy-label { display: inline-block; padding: 0.15rem 0.7rem; border-radius: 0.3rem; font-weight: 600;
-                background: #E5E7EB; color: #111827; letter-spacing: 0.02em; }
+                background: #D8DBDF; color: #0B0C0E; letter-spacing: 0.02em; }
+
+/* Greys: dark main page #2B2E33, cards #363A41, light-grey sidebar #BDC1C7 with black text */
+[data-testid="stSidebar"] { background: #BDC1C7; }
+[data-testid="stSidebar"] * { color: #0B0C0E; }
+[data-testid="stSidebar"] hr { border-color: #8E949C; }
+[data-testid="stSidebar"] a[aria-current="page"] { background: #A3A8AF; }
+[data-testid="stSidebar"] button { background: #E4E6E9; border: 1px solid #7C838C; }
+[data-testid="stPlotlyChart"], [data-testid="stMetric"], [data-testid="stDataFrame"] {
+    background: #363A41; border: 1px solid #4A4F57; border-radius: 0.5rem; padding: 0.6rem 0.8rem; }
 </style>
 """
 

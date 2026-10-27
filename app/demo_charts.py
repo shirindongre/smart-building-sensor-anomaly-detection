@@ -7,14 +7,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # One colour per meaning, used on every page.
-ENERGY = "#6B7280"  # grey: energy and error lines
-THRESHOLD = "#DC2626"  # red: threshold and drift gate
-FLAG = "#2563EB"  # blue accent: flagged points and spans
-INJECTED = "#D97706"  # amber: injected span
-DRIFT = "#CBD5E1"  # light slate: drift periods
-GRID = "#E5E7EB"
-INK = "#111827"
-SURFACE = "#FFFFFF"
+ENERGY = "#C9CED6"  # light grey: energy and error lines
+THRESHOLD = "#FF5A5A"  # bright red: threshold and drift gate
+FLAG = "#5AB0FF"  # bright blue accent: flagged points and spans
+INJECTED = "#FBBF24"  # bright amber: injected span
+DRIFT = "#8A919B"  # mid grey: drift periods
+GRID = "#4A4F57"
+INK = "#ECEEF1"
+SURFACE = "#363A41"
 
 ENERGY_LABEL = "Energy (raw meter units per hour)"
 ERROR_LABEL = "Reconstruction error (MSE)"
@@ -48,7 +48,7 @@ def timeline_figure(res: pd.DataFrame, *, normalized: bool = True, spans=None, r
 
     if ref_energy is not None:
         fig.add_trace(go.Scatter(x=x, y=ref_energy.reindex(x), mode="lines", name="Clean energy",
-                                 line=dict(color="#9CA3AF", width=1.2, dash="dot"),
+                                 line=dict(color="#8A919B", width=1.2, dash="dot"),
                                  hovertemplate="Clean: %{y:.1f}<extra></extra>"), row=1, col=1)
     fig.add_trace(go.Scatter(x=x, y=res["energy"], mode="lines", name="Energy", line=dict(color=ENERGY, width=1.3),
                              hovertemplate="Energy: %{y:.1f}<extra></extra>"), row=1, col=1)
@@ -105,7 +105,7 @@ def timeline_figure(res: pd.DataFrame, *, normalized: bool = True, spans=None, r
     if x_range is not None:
         fig.update_xaxes(range=[x_range[0], x_range[1]])
     fig.update_layout(
-        template="plotly_white", height=height or (820 if normalized else 640), hovermode="x unified",
+        template="plotly_dark", height=height or (820 if normalized else 640), hovermode="x unified",
         font=dict(size=14, color=INK), margin=dict(l=70, r=20, t=40, b=60), dragmode="zoom",
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0, font=dict(size=14)),
         plot_bgcolor=SURFACE, paper_bgcolor=SURFACE,
@@ -115,16 +115,17 @@ def timeline_figure(res: pd.DataFrame, *, normalized: bool = True, spans=None, r
 
 def recall_bar_figure(long: pd.DataFrame, types: list[str]) -> go.Figure:
     """Grouped bars: recall by event type, one group per building. Four categorical colours (Okabe-Ito)."""
-    palette = ["#0072B2", "#E69F00", "#009E73", "#CC79A7"]
+    palette = ["#56B4E9", "#E69F00", "#2FCB9B", "#E58FC1"]
     fig = go.Figure()
     for t, col in zip(types, palette):
         d = long[long["type"] == t]
         fig.add_trace(go.Bar(x=d["building"], y=d["recall"], name=t.replace("_", " "), marker=dict(color=col),
                              text=[f"{v:.0%}" for v in d["recall"]], textposition="outside",
                              hovertemplate="%{x}<br>" + t.replace("_", " ") + " recall: %{y:.0%}<extra></extra>"))
-    fig.update_layout(template="plotly_white", barmode="group", height=460, font=dict(size=14, color=INK),
+    fig.update_layout(template="plotly_dark", barmode="group", height=460, font=dict(size=14, color=INK),
                       yaxis=dict(title="Recall (share of scored events found)", tickformat=".0%", range=[0, 1.15],
                                  gridcolor=GRID),
                       xaxis=dict(title="Building"), legend=dict(orientation="h", y=1.1, x=0),
-                      margin=dict(l=70, r=20, t=40, b=60), bargap=0.25, bargroupgap=0.08)
+                      margin=dict(l=70, r=20, t=40, b=60), bargap=0.25, bargroupgap=0.08,
+                      plot_bgcolor=SURFACE, paper_bgcolor=SURFACE)
     return fig
